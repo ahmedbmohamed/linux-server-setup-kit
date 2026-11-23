@@ -50,16 +50,19 @@ Nightly ──► restic backup (DB dump + /etc + /opt + /var/www) ──► loc
 4. removes the temporary folder and databases
 5. writes `reports/<host>-<app>-restore-test.md` and **fails** if anything does not match
 
-### Results (lab test, Ubuntu 24.04)
+### Results (Ubuntu 22.04 VM, VMware, production + staging on the same server)
 
-| Check | Result |
-|---|---|
-| HTTP → HTTPS redirect | 301 |
-| `/health` through Nginx over HTTPS | `{"status":"ok","database":"ok","env":"production"}` |
-| Ports open to the network | 443 (and 80 for the redirect) only; app and MariaDB on 127.0.0.1 |
-| First backup | `BACKUP OK` |
-| Restore test | **PASSED**: snapshot restored in 19.6 s, **108,859 files identical**, database restored with the same tables and rows |
-| Second run of the playbook | `changed=0` (idempotent) |
+| Check | Production | Staging |
+|---|---|---|
+| Deploy | ✅ `failed=0` | ✅ `failed=0` |
+| `/health` through Nginx over HTTPS | `{"database":"ok","env":"production","status":"ok"}` | `{"database":"ok","env":"staging","status":"ok"}` |
+| URL | `https://<server>/` | `https://<server>:8443/` |
+| Public ports | 80/443 only (app on 127.0.0.1:8000, MariaDB on 127.0.0.1:3306) | 8080/8443 only (app on 127.0.0.1:8001) |
+| First backup | `BACKUP OK` in 3 s | `BACKUP OK` in 3 s |
+| Restore test | **PASSED**: restored in 1.0 s, 23 files identical, database rows match | **PASSED**: restored in 1.2 s, 23 files identical, database rows match |
+| Second run | `changed=0` | `changed=0` |
+
+The same checks run automatically on Ubuntu 24.04 in CI on every push.
 
 ## Quick start
 
