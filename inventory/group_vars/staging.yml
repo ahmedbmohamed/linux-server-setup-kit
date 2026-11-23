@@ -1,0 +1,10 @@
+---
+# Staging copy: its own app name, database, ports and backup repository,
+# so it can even run on the same server as production.
+app_server_name: demoapp-staging
+app_server_env: staging
+app_server_port: 8001
+app_server_http_port: 8080
+app_server_https_port: 8443
+backup_repository: /var/backups/restic-staging
+backup_schedule: "*-*-* 03:30:00"

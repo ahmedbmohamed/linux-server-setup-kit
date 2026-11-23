@@ -1,0 +1,8 @@
+inventory/hosts.ini
+reports/*
+!reports/.gitkeep
+credentials/
+__pycache__/
+*.retry
+*.log
+.vagrant/

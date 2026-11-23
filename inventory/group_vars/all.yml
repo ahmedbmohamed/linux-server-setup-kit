@@ -1,0 +1,10 @@
+---
+# Shared settings. All options: roles/app_server/defaults/main.yml and roles/backup/defaults/main.yml
+app_server_name: demoapp
+
+# Real domain + email = free Let's Encrypt certificate. Empty = self-signed (lab).
+app_server_domain: ""
+app_server_letsencrypt_email: ""
+
+# Backups: local disk by default. For S3 / Backblaze B2 / SFTP see roles/backup/defaults/main.yml
+backup_repository: /var/backups/restic

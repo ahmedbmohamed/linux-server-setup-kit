@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: pip install ansible-core ansible-lint
+      - run: ansible-lint
+
+  deploy:
+    name: Ubuntu 24.04 - production + staging on one server, HTTPS, backup, restore test
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Remove the MySQL that comes with the runner (we install MariaDB)
+        run: |
+          sudo systemctl stop mysql || true
+          sudo apt-get purge -y -q 'mysql-*' >/dev/null
+          sudo rm -rf /var/lib/mysql /etc/mysql
+      - run: pip install ansible-core
+      - name: Inventory (production and staging on the same machine)
+        run: |
+          printf '[production]\nprod ansible_connection=local ansible_python_interpreter=/usr/bin/python3\n[staging]\nstage ansible_connection=local ansible_python_interpreter=/usr/bin/python3\n' > inventory/hosts.ini
+      - name: Deploy production
+        run: |
+          set -o pipefail
+          ansible-playbook playbooks/site.yml -l production 2>&1 | tee deploy.log || {
+            grep -E -A4 'FAILED!|fatal:|ERROR' deploy.log | head -30 | sed 's/^/::error::/'; exit 1; }
+      - name: Deploy staging next to it
+        run: |
+          set -o pipefail
+          ansible-playbook playbooks/site.yml -l staging 2>&1 | tee staging.log || {
+            grep -E -A4 'FAILED!|fatal:|ERROR' staging.log | head -30 | sed 's/^/::error::/'; exit 1; }
+      - name: Check both apps over HTTPS
+        run: |
+          curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/ | grep -q 301
+          curl -sk https://127.0.0.1/health | tee /dev/stderr | grep -q '"env":"production"'
+          curl -sk https://127.0.0.1:8443/health | tee /dev/stderr | grep -q '"env":"staging"'
+          curl -sk https://127.0.0.1/ | grep -q 'Visits stored in MariaDB'
+          curl -skI https://127.0.0.1/ | grep -qi '^strict-transport-security'
+          ! ss -tln | grep -E '0\.0\.0\.0:(3306|8000|8001)'
+      - name: Idempotence (second run must change nothing)
+        run: |
+          ansible-playbook playbooks/site.yml | tee second-run.log
+          ! grep -E 'changed=[1-9]' second-run.log
+      - name: Restore test (production and staging)
+        run: |
+          set -o pipefail
+          ansible-playbook playbooks/restore_test.yml 2>&1 | tee restore.log || {
+            grep -E -A4 'FAILED!|fatal:|ERROR' restore.log | head -30 | sed 's/^/::error::/'; exit 1; }
+          grep -h 'Result:' reports/*-restore-test.md
+      - name: Nightly timers are active
+        run: systemctl list-timers 'server-backup-*' --no-pager
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: restore-test-reports
+          path: reports/

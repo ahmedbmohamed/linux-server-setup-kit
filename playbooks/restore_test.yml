@@ -1,0 +1,11 @@
+---
+# Back up now, restore the latest backup into a temporary area, compare files and
+# database rows with the live server, clean up, and write reports/<host>-restore-test.md
+- name: Backup restore test
+  hosts: all
+  become: true
+  tasks:
+    - name: Restore test
+      ansible.builtin.include_role:
+        name: backup
+        tasks_from: restore_test

@@ -1,0 +1,79 @@
+---
+- name: System user for the app (no login)
+  ansible.builtin.user:
+    name: "{{ app_server_user }}"
+    system: true
+    home: "{{ app_server_dir }}"
+    create_home: false
+    shell: "{{ app_server_nologin }}"
+
+- name: App folder (code owned by root, read-only for the app)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ app_server_user }}"
+    mode: "0750"
+  loop:
+    - "{{ app_server_dir }}"
+    - "{{ app_server_dir }}/src"
+
+- name: Deploy the demo app
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ app_server_dir }}/src/{{ item }}"
+    owner: root
+    group: "{{ app_server_user }}"
+    mode: "0640"
+  loop:
+    - app.py
+    - requirements.txt
+  when: app_server_git_repo | length == 0
+  notify: Restart app
+
+- name: Deploy the app from git
+  ansible.builtin.git:
+    repo: "{{ app_server_git_repo }}"
+    version: "{{ app_server_git_version }}"
+    dest: "{{ app_server_dir }}/src"
+    force: true
+  when: app_server_git_repo | length > 0
+  notify: Restart app
+
+- name: Python virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv {{ app_server_dir }}/venv
+    creates: "{{ app_server_dir }}/venv/bin/python"
+
+- name: Install Python requirements
+  ansible.builtin.pip:
+    requirements: "{{ app_server_dir }}/src/requirements.txt"
+    executable: "{{ app_server_dir }}/venv/bin/pip"
+  notify: Restart app
+
+- name: Environment file with the database password (root and the app only)
+  ansible.builtin.template:
+    src: app.env.j2
+    dest: "{{ app_server_dir }}/.env"
+    owner: root
+    group: "{{ app_server_user }}"
+    mode: "0640"
+  diff: false
+  notify: Restart app
+
+- name: Hardened systemd service
+  ansible.builtin.template:
+    src: app.service.j2
+    dest: "/etc/systemd/system/{{ app_server_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart app
+
+- name: Start and enable the app
+  ansible.builtin.systemd_service:
+    name: "{{ app_server_name }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: app_server_manage_services | bool

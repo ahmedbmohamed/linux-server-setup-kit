@@ -1,0 +1,10 @@
+---
+# Deploy the app (Nginx + HTTPS + MariaDB + systemd) and set up nightly backups.
+#   ansible-playbook playbooks/site.yml                 # all servers
+#   ansible-playbook playbooks/site.yml -l staging      # only staging
+- name: Deploy the app and backups
+  hosts: all
+  become: true
+  roles:
+    - role: app_server
+    - role: backup

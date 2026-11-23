@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: backup
+  author: Ahmed Ben Mohamed
+  description: Encrypted restic backups (files + MariaDB dumps) with retention and an automatic restore test
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9"]
+    - name: Ubuntu
+      versions: [jammy, noble]
+    - name: Debian
+      versions: [bookworm]
+  galaxy_tags: [backup, restic, mariadb, restore, disasterrecovery]
+dependencies: []

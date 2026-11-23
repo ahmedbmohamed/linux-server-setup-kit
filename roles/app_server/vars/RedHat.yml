@@ -1,0 +1,12 @@
+---
+app_server_packages:
+  - nginx
+  - mariadb-server
+  - mariadb
+  - python3
+  - python3-pip
+  - git
+  - openssl
+  - policycoreutils-python-utils
+app_server_mariadb_conf: /etc/my.cnf.d/99-app-server.cnf
+app_server_nologin: /sbin/nologin

@@ -1,0 +1,2 @@
+---
+backup_restic_env: "{{ {'RESTIC_REPOSITORY': backup_repository, 'RESTIC_PASSWORD_FILE': '/etc/restic/' ~ backup_name ~ '/password'} | combine(backup_env) }}"

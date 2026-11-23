@@ -1,0 +1,30 @@
+# {{ ansible_managed }}
+[Unit]
+Description={{ app_server_name }} ({{ app_server_env }}) - Gunicorn
+After=network.target{{ ' mariadb.service' if app_server_db | bool else '' }}
+Wants={{ 'mariadb.service' if app_server_db | bool else 'network.target' }}
+
+[Service]
+User={{ app_server_user }}
+Group={{ app_server_user }}
+WorkingDirectory={{ app_server_dir }}/src
+EnvironmentFile={{ app_server_dir }}/.env
+ExecStart={{ app_server_dir }}/venv/bin/gunicorn --workers {{ app_server_workers }} --bind 127.0.0.1:{{ app_server_port }} --access-logfile - {{ app_server_wsgi_module }}
+Restart=always
+RestartSec=3
+
+# Sandboxing: the app cannot change the system even if it is hacked
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

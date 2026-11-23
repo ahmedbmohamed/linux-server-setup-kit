@@ -1,0 +1,51 @@
+---
+# Name of this backup set (one per app, so staging and production can share a server)
+backup_name: "{{ app_server_name | default('server') }}"
+
+# ---------- Where backups go (restic repository) ----------
+# Local disk (default), or for example:
+#   s3:s3.amazonaws.com/my-bucket/server1
+#   b2:my-bucket:server1
+#   sftp:backup@backup-host:/srv/restic/server1
+backup_repository: /var/backups/restic
+# Extra variables for the repository, e.g. for S3 / Backblaze B2:
+#   AWS_ACCESS_KEY_ID: "..."      AWS_SECRET_ACCESS_KEY: "..."
+#   B2_ACCOUNT_ID: "..."          B2_ACCOUNT_KEY: "..."
+backup_env: {}
+# Encryption password. Generated once and kept in credentials/ on the machine
+# running Ansible. KEEP A COPY SOMEWHERE SAFE: without it the backups cannot be read.
+backup_password: "{{ lookup('ansible.builtin.password', playbook_dir ~ '/../credentials/' ~ inventory_hostname ~ '-' ~ backup_name ~ '-restic chars=ascii_letters,digits length=32') }}"
+
+# ---------- What is backed up ----------
+backup_paths:
+  - /etc
+  - /opt
+  - /var/www
+  - "/var/backups/db/{{ backup_name }}"   # database dumps, made just before each backup
+backup_excludes:
+  - /opt/*/venv
+  - "*.pyc"
+  - __pycache__
+  - /var/www/letsencrypt
+backup_mysql: true           # dump the databases first (if MariaDB/MySQL is installed)
+# Databases to dump. Default: the app database. Empty list = every database.
+backup_mysql_databases: "{{ [app_server_db_name] if app_server_db_name is defined else [] }}"
+backup_dump_dir: "/var/backups/db/{{ backup_name }}"
+
+# ---------- When and how long ----------
+backup_schedule: "*-*-* 02:30:00"   # systemd OnCalendar format (every night 02:30)
+backup_keep_daily: 7
+backup_keep_weekly: 4
+backup_keep_monthly: 6
+backup_run_now: true         # make the first backup during the deployment
+
+# ---------- Restore test ----------
+# Folders compared file by file between the live server and the restored copy
+backup_verify_paths:
+  - /etc/nginx
+  - /opt
+backup_report_dir: "{{ playbook_dir }}/../reports"
+
+# Test mode: false inside containers without systemd
+backup_manage_services: true
+backup_restore_test_backup_first: true   # make a fresh backup right before the restore test

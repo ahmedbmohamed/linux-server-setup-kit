@@ -1,0 +1,39 @@
+---
+# Opens HTTP/HTTPS only if a firewall is already active (it never turns one on).
+- name: Is UFW active?
+  ansible.builtin.command: ufw status
+  register: app_server_ufw
+  changed_when: false
+  failed_when: false
+
+- name: Open the web ports in UFW
+  ansible.builtin.command: "ufw allow {{ item }}/tcp"
+  loop: "{{ [app_server_http_port, app_server_https_port] | map('int') | unique }}"
+  register: app_server_ufw_allow
+  changed_when: "'Skipping' not in app_server_ufw_allow.stdout"
+  when: "'Status: active' in app_server_ufw.stdout | default('')"
+
+- name: Is firewalld running?
+  ansible.builtin.command: firewall-cmd --state
+  register: app_server_firewalld
+  changed_when: false
+  failed_when: false
+
+- name: Which web ports are already open in firewalld?
+  ansible.builtin.command: "firewall-cmd --permanent --query-port={{ item }}/tcp"
+  loop: "{{ [app_server_http_port, app_server_https_port] | map('int') | unique }}"
+  register: app_server_fw_query
+  changed_when: false
+  failed_when: app_server_fw_query.rc not in [0, 1]
+  when: "'running' in app_server_firewalld.stdout | default('')"
+
+- name: Open the web ports in firewalld
+  ansible.builtin.command: "firewall-cmd --permanent --add-port={{ item.item }}/tcp"
+  loop: "{{ app_server_fw_query.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('') }}"
+  when:
+    - item.rc is defined
+    - item.rc == 1
+  changed_when: true
+  notify: Reload firewalld

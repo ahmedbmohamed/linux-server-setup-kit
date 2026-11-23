@@ -1,0 +1,38 @@
+---
+# ---------- App ----------
+app_server_name: demoapp                 # used for the user, folder, service and database names
+app_server_env: production               # shown by the demo app (production / staging)
+app_server_dir: "/opt/{{ app_server_name }}"
+app_server_user: "{{ app_server_name }}"
+app_server_port: 8000                    # Gunicorn listens on 127.0.0.1 only
+app_server_workers: 2
+# Leave empty to deploy the included demo Flask app.
+# Or set a git repo with a Python WSGI app (requirements.txt + module:app).
+app_server_git_repo: ""
+app_server_git_version: main
+app_server_wsgi_module: "app:app"
+app_server_extra_env: {}                 # extra variables written to the .env file
+
+# ---------- Domain and HTTPS ----------
+# Empty domain = self-signed certificate (lab / IP only).
+app_server_domain: ""
+app_server_letsencrypt_email: ""         # required for Let's Encrypt
+app_server_letsencrypt_staging: false    # true = test certificates (no rate limits)
+# Let's Encrypt is used only when both a domain and an email are given
+app_server_use_letsencrypt: "{{ app_server_domain | length > 0 and app_server_letsencrypt_email | length > 0 }}"
+app_server_client_max_body_size: 20m
+app_server_http_port: 80
+app_server_https_port: 443
+
+# ---------- Database (MariaDB) ----------
+app_server_db: true
+app_server_db_name: "{{ app_server_name }}"
+app_server_db_user: "{{ app_server_name }}"
+# Generated once on the machine running Ansible and kept in credentials/ (never commit it)
+app_server_db_password: "{{ lookup('ansible.builtin.password', playbook_dir ~ '/../credentials/' ~ inventory_hostname ~ '-' ~ app_server_name ~ '-db chars=ascii_letters,digits length=28') }}"
+
+# ---------- Firewall ----------
+app_server_open_firewall: true           # open 80/443 if UFW or firewalld is active
+
+# Test mode: false inside containers without systemd
+app_server_manage_services: true

@@ -1,0 +1,60 @@
+# {{ ansible_managed }}
+# {{ app_server_name }} ({{ app_server_env }})
+{% set names = ([app_server_domain] if app_server_domain else (['localhost', '127.0.0.1', inventory_hostname] + ansible_facts['all_ipv4_addresses'] | default([]))) | unique %}
+{% set https_suffix = '' if app_server_https_port | int == 443 else ':' ~ app_server_https_port %}
+
+server {
+    listen {{ app_server_http_port }};
+    server_name {{ names | join(' ') }};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+{% if app_server_http_only %}
+
+    location / {
+        return 503;
+    }
+{% else %}
+
+    location / {
+        return 301 https://$host{{ https_suffix }}$request_uri;
+    }
+{% endif %}
+}
+{% if not app_server_http_only %}
+
+server {
+    listen {{ app_server_https_port }} ssl http2;
+    server_name {{ names | join(' ') }};
+
+    ssl_certificate     {{ app_server_cert }};
+    ssl_certificate_key {{ app_server_key }};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL_{{ app_server_name | regex_replace('[^A-Za-z0-9]', '_') }}:10m;
+    ssl_session_timeout 1d;
+
+    server_tokens off;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    client_max_body_size {{ app_server_client_max_body_size }};
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;
+
+    access_log /var/log/nginx/{{ app_server_name }}.access.log;
+    error_log  /var/log/nginx/{{ app_server_name }}.error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:{{ app_server_port }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}
+{% endif %}

@@ -1,0 +1,14 @@
+---
+# Run a backup immediately (same as the nightly timer)
+- name: Backup now
+  hosts: all
+  become: true
+  tasks:
+    - name: Run the backup
+      ansible.builtin.command: "/usr/local/sbin/server-backup-{{ backup_name | default(app_server_name) }}"
+      register: backup_now
+      changed_when: true
+
+    - name: Result
+      ansible.builtin.debug:
+        msg: "{{ backup_now.stdout_lines | last }}"

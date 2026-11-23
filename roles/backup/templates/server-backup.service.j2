@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Nightly backup of {{ backup_name }} (restic)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/server-backup-{{ backup_name }}
+Nice=10
+IOSchedulingClass=idle

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Nightly backup: database dumps + files -> restic (encrypted), then retention and a repository check.
+set -euo pipefail
+set -a
+# shellcheck disable=SC1091
+. /etc/restic/{{ backup_name }}/backup.env
+set +a
+
+STATUS=/var/backups/last-backup-{{ backup_name }}.json
+START=$(date +%s)
+fail() { echo "{\"status\":\"failed\",\"time\":\"$(date -Is)\",\"step\":\"$1\"}" > "$STATUS"; echo "BACKUP FAILED at step: $1" >&2; exit 1; }
+trap 'fail "${STEP:-unknown}"' ERR
+
+{% if backup_mysql | bool %}
+STEP="database dump"
+mkdir -p {{ backup_dump_dir }}
+chmod 700 {{ backup_dump_dir }}
+if command -v mysql >/dev/null 2>&1 && mysql -NBe "SELECT 1" >/dev/null 2>&1; then
+  DUMP=$(command -v mariadb-dump || command -v mysqldump)
+  rm -f {{ backup_dump_dir }}/*.sql.gz
+{% if backup_mysql_databases %}
+  DBS="{{ backup_mysql_databases | join(' ') }}"
+{% else %}
+  DBS=$(mysql -NBe "SHOW DATABASES" | grep -Ev '^(information_schema|performance_schema|mysql|sys)$')
+{% endif %}
+  for DB in $DBS; do
+    "$DUMP" --single-transaction --routines --triggers --events "$DB" | gzip > "{{ backup_dump_dir }}/$DB.sql.gz.tmp"
+    mv "{{ backup_dump_dir }}/$DB.sql.gz.tmp" "{{ backup_dump_dir }}/$DB.sql.gz"
+    echo "dumped database $DB"
+  done
+fi
+{% endif %}
+
+STEP="restic backup"
+PATHS=()
+for P in {% for p in backup_paths %}{{ p | quote }} {% endfor %}; do
+  if [ -e "$P" ]; then PATHS+=("$P"); fi
+done
+SNAP=$(restic backup --json --tag scheduled --tag {{ backup_name }} --exclude-file /etc/restic/{{ backup_name }}/excludes "${PATHS[@]}" \
+  | tail -n 1 | sed -n 's/.*"snapshot_id":"\([0-9a-f]*\)".*/\1/p')
+
+STEP="retention"
+restic forget --keep-daily {{ backup_keep_daily }} --keep-weekly {{ backup_keep_weekly }} --keep-monthly {{ backup_keep_monthly }} --prune --quiet
+
+STEP="repository check"
+restic check --quiet
+
+END=$(date +%s)
+echo "{\"status\":\"ok\",\"time\":\"$(date -Is)\",\"snapshot\":\"${SNAP:0:8}\",\"duration_s\":$((END-START))}" > "$STATUS"
+echo "BACKUP OK snapshot ${SNAP:0:8} in $((END-START))s"

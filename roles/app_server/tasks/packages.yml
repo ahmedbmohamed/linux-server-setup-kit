@@ -1,0 +1,27 @@
+---
+- name: Import the EPEL signing key (RHEL)
+  ansible.builtin.rpm_key:
+    key: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-{{ ansible_facts['distribution_major_version'] }}"
+    state: present
+  when:
+    - ansible_facts['distribution'] == 'RedHat'
+    - app_server_use_letsencrypt | bool
+
+- name: Enable EPEL on RHEL family (needed for certbot)
+  ansible.builtin.dnf:
+    name: "{{ 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-' ~ ansible_facts['distribution_major_version'] ~ '.noarch.rpm' if ansible_facts['distribution'] == 'RedHat' else 'epel-release' }}"
+    state: present
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - app_server_use_letsencrypt | bool
+
+- name: Refresh apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install packages
+  ansible.builtin.package:
+    name: "{{ app_server_packages + (['certbot'] if app_server_use_letsencrypt | bool else []) }}"
+    state: present

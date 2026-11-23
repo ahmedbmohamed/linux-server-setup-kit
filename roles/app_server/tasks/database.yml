@@ -1,0 +1,72 @@
+---
+- name: MariaDB listens on localhost only
+  ansible.builtin.copy:
+    dest: "{{ app_server_mariadb_conf }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by linux-server-setup-kit
+      [mysqld]
+      bind-address = 127.0.0.1
+      local-infile = 0
+  notify: Restart mariadb
+
+- name: Start and enable MariaDB
+  ansible.builtin.systemd_service:
+    name: mariadb
+    state: started
+    enabled: true
+  when: app_server_manage_services | bool
+
+- name: Apply the MariaDB config now
+  ansible.builtin.meta: flush_handlers
+
+- name: Check whether the database exists
+  ansible.builtin.command:
+    cmd: mysql -NBe "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='{{ app_server_db_name }}'"
+  register: app_server_db_exists
+  changed_when: false
+
+- name: Create the database
+  ansible.builtin.command:
+    cmd: mysql
+    stdin: "CREATE DATABASE `{{ app_server_db_name }}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+  when: app_server_db_exists.stdout | trim | length == 0
+  changed_when: true
+
+- name: Check that the app user can log in to its database
+  ansible.builtin.command:
+    cmd: mysql -h 127.0.0.1 -u {{ app_server_db_user }} -NBe "SELECT 1" {{ app_server_db_name }}
+  environment:
+    MYSQL_PWD: "{{ app_server_db_password }}"
+  register: app_server_db_login
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create or fix the app database user
+  ansible.builtin.command:
+    cmd: mysql
+    stdin: |
+      CREATE USER IF NOT EXISTS '{{ app_server_db_user }}'@'localhost';
+      CREATE USER IF NOT EXISTS '{{ app_server_db_user }}'@'127.0.0.1';
+      ALTER USER '{{ app_server_db_user }}'@'localhost' IDENTIFIED BY '{{ app_server_db_password }}';
+      ALTER USER '{{ app_server_db_user }}'@'127.0.0.1' IDENTIFIED BY '{{ app_server_db_password }}';
+      GRANT ALL PRIVILEGES ON `{{ app_server_db_name }}`.* TO '{{ app_server_db_user }}'@'localhost';
+      GRANT ALL PRIVILEGES ON `{{ app_server_db_name }}`.* TO '{{ app_server_db_user }}'@'127.0.0.1';
+      FLUSH PRIVILEGES;
+  when: app_server_db_login.rc != 0
+  changed_when: true
+  no_log: true
+
+- name: Remove anonymous users and the test database
+  ansible.builtin.command:
+    cmd: mysql
+    stdin: |
+      DELETE FROM mysql.global_priv WHERE User='';
+      DROP DATABASE IF EXISTS test;
+      FLUSH PRIVILEGES;
+  register: app_server_db_cleanup
+  changed_when: false
+  failed_when: false

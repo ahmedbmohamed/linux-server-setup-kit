@@ -1,0 +1,119 @@
+---
+- name: Folder for Let's Encrypt challenges
+  ansible.builtin.file:
+    path: /var/www/letsencrypt
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: SELinux, is nginx allowed to connect to the app?
+  ansible.builtin.command: getsebool httpd_can_network_connect
+  register: app_server_sebool
+  changed_when: false
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - ansible_facts['selinux']['status'] | default('disabled') == 'enabled'
+
+- name: SELinux, let nginx reach the app on 127.0.0.1
+  ansible.builtin.command: setsebool -P httpd_can_network_connect on
+  changed_when: true
+  when:
+    - app_server_sebool is not skipped
+    - "'--> on' not in app_server_sebool.stdout"
+
+# ---------- Self-signed certificate (no domain) ----------
+- name: Self-signed certificate folder
+  ansible.builtin.file:
+    path: /etc/ssl/{{ app_server_name }}
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: not app_server_use_letsencrypt | bool
+
+- name: Self-signed certificate (lab / IP address only, valid 2 years)
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -nodes -newkey rsa:2048 -days 730
+      -subj "/CN={{ app_server_domain if app_server_domain else ansible_facts['fqdn'] | default(inventory_hostname) }}"
+      -keyout /etc/ssl/{{ app_server_name }}/privkey.pem
+      -out /etc/ssl/{{ app_server_name }}/fullchain.pem
+    creates: /etc/ssl/{{ app_server_name }}/fullchain.pem
+  when: not app_server_use_letsencrypt | bool
+  notify: Reload nginx
+
+- name: Certificate paths
+  ansible.builtin.set_fact:
+    app_server_cert: "{{ ('/etc/letsencrypt/live/' ~ app_server_domain ~ '/fullchain.pem') if app_server_use_letsencrypt | bool else ('/etc/ssl/' ~ app_server_name ~ '/fullchain.pem') }}"
+    app_server_key: "{{ ('/etc/letsencrypt/live/' ~ app_server_domain ~ '/privkey.pem') if app_server_use_letsencrypt | bool else ('/etc/ssl/' ~ app_server_name ~ '/privkey.pem') }}"
+
+# ---------- Let's Encrypt ----------
+- name: Let's Encrypt
+  when: app_server_use_letsencrypt | bool
+  block:
+    - name: Is there already a certificate?
+      ansible.builtin.stat:
+        path: "{{ app_server_cert }}"
+      register: app_server_cert_stat
+
+    - name: Temporary HTTP-only site for the first certificate
+      ansible.builtin.template:
+        src: nginx-site.conf.j2
+        dest: /etc/nginx/conf.d/{{ app_server_name }}.conf
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        app_server_http_only: true
+      when: not app_server_cert_stat.stat.exists
+
+    - name: Load the temporary site
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+      when:
+        - not app_server_cert_stat.stat.exists
+        - app_server_manage_services | bool
+
+    - name: Get the certificate from Let's Encrypt
+      ansible.builtin.command:
+        cmd: >-
+          certbot certonly --webroot -w /var/www/letsencrypt
+          -d {{ app_server_domain }} --email {{ app_server_letsencrypt_email }}
+          --agree-tos --non-interactive --keep-until-expiring
+          {{ '--staging' if app_server_letsencrypt_staging | bool else '' }}
+        creates: "{{ app_server_cert }}"
+
+    - name: Reload nginx after automatic renewals
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          systemctl reload nginx
+
+# ---------- Nginx site ----------
+- name: Nginx site (HTTPS, HTTP redirect, security headers)
+  ansible.builtin.template:
+    src: nginx-site.conf.j2
+    dest: /etc/nginx/conf.d/{{ app_server_name }}.conf
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    app_server_http_only: false
+  notify: Reload nginx
+
+- name: Test the Nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Start and enable Nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: started
+    enabled: true
+  when: app_server_manage_services | bool

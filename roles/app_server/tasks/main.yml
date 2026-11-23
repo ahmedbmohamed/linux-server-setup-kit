@@ -1,0 +1,56 @@
+---
+- name: Check that the OS is supported
+  ansible.builtin.assert:
+    that: ansible_facts['os_family'] in ['RedHat', 'Debian']
+    fail_msg: "Supported: RHEL/Rocky/AlmaLinux 9 and Ubuntu/Debian."
+    quiet: true
+
+- name: Load OS family variables
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+
+- name: Packages
+  ansible.builtin.import_tasks: packages.yml
+  tags: [packages]
+
+- name: Database
+  ansible.builtin.import_tasks: database.yml
+  when: app_server_db | bool
+  tags: [database]
+
+- name: Application
+  ansible.builtin.import_tasks: app.yml
+  tags: [app]
+
+- name: HTTPS certificate and Nginx
+  ansible.builtin.import_tasks: nginx.yml
+  tags: [nginx]
+
+- name: Firewall
+  ansible.builtin.import_tasks: firewall.yml
+  when: app_server_open_firewall | bool
+  tags: [firewall]
+
+- name: Apply pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+- name: Check the app answers through Nginx over HTTPS
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ app_server_https_port }}/health"
+    headers:
+      Host: "{{ app_server_domain if app_server_domain else '127.0.0.1' }}"
+    validate_certs: false
+    return_content: true
+  register: app_server_health
+  until: app_server_health.status == 200
+  retries: 10
+  delay: 3
+  when: app_server_manage_services | bool
+  tags: [verify]
+
+- name: Summary
+  ansible.builtin.debug:
+    msg:
+      - "App '{{ app_server_name }}' ({{ app_server_env }}) deployed in {{ app_server_dir }}"
+      - "URL: https://{{ app_server_domain if app_server_domain else ansible_facts['default_ipv4']['address'] | default('SERVER-IP') }}{{ '' if app_server_https_port | int == 443 else ':' ~ app_server_https_port }}/"
+      - "Certificate: {{ \"Let's Encrypt\" if app_server_use_letsencrypt else 'self-signed (lab / no domain)' }}"
+      - "Health: {{ app_server_health.json | default('not checked') }}"

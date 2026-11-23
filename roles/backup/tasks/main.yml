@@ -1,0 +1,139 @@
+---
+- name: Enable EPEL on RHEL family (restic comes from EPEL)
+  when: ansible_facts['os_family'] == 'RedHat'
+  block:
+    - name: Import the EPEL signing key (RHEL)
+      ansible.builtin.rpm_key:
+        key: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-{{ ansible_facts['distribution_major_version'] }}"
+        state: present
+      when: ansible_facts['distribution'] == 'RedHat'
+
+    - name: Enable EPEL
+      ansible.builtin.dnf:
+        name: "{{ 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-' ~ ansible_facts['distribution_major_version'] ~ '.noarch.rpm' if ansible_facts['distribution'] == 'RedHat' else 'epel-release' }}"
+        state: present
+
+- name: Install restic
+  ansible.builtin.package:
+    name: restic
+    state: present
+
+- name: Config folders (root only)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - /etc/restic
+    - "/etc/restic/{{ backup_name }}"
+
+- name: Repository password (root only)
+  ansible.builtin.copy:
+    dest: "/etc/restic/{{ backup_name }}/password"
+    content: "{{ backup_password }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Repository settings (root only)
+  ansible.builtin.template:
+    src: backup.env.j2
+    dest: "/etc/restic/{{ backup_name }}/backup.env"
+    owner: root
+    group: root
+    mode: "0600"
+  diff: false
+
+- name: Exclude list
+  ansible.builtin.copy:
+    dest: "/etc/restic/{{ backup_name }}/excludes"
+    content: "{{ backup_excludes | join('\n') }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Local repository folder
+  ansible.builtin.file:
+    path: "{{ backup_repository }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: backup_repository.startswith('/')
+
+- name: Does the repository exist?
+  ansible.builtin.command: restic cat config
+  environment: "{{ backup_restic_env }}"
+  register: backup_repo_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create the encrypted repository
+  ansible.builtin.command: restic init
+  environment: "{{ backup_restic_env }}"
+  when: backup_repo_check.rc != 0
+  changed_when: true
+  no_log: true
+
+- name: Backup script
+  ansible.builtin.template:
+    src: server-backup.sh.j2
+    dest: "/usr/local/sbin/server-backup-{{ backup_name }}"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Restore test script
+  ansible.builtin.copy:
+    src: restore_test.py
+    dest: /usr/local/sbin/restore-test
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Systemd service and nightly timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item | replace('server-backup', 'server-backup-' ~ backup_name) }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - server-backup.service
+    - server-backup.timer
+  notify: Reload systemd
+
+- name: Apply systemd changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable the nightly timer
+  ansible.builtin.systemd_service:
+    name: "server-backup-{{ backup_name }}.timer"
+    state: started
+    enabled: true
+  when: backup_manage_services | bool
+
+- name: Was a backup already made?
+  ansible.builtin.stat:
+    path: "/var/backups/last-backup-{{ backup_name }}.json"
+  register: backup_last
+
+- name: First backup now
+  ansible.builtin.command: "/usr/local/sbin/server-backup-{{ backup_name }}"
+  register: backup_first
+  changed_when: true
+  when:
+    - backup_run_now | bool
+    - not backup_last.stat.exists
+
+- name: Summary
+  ansible.builtin.debug:
+    msg:
+      - "Backup set '{{ backup_name }}' -> {{ backup_repository }}"
+      - "Schedule: {{ backup_schedule }} | keep {{ backup_keep_daily }} daily, {{ backup_keep_weekly }} weekly, {{ backup_keep_monthly }} monthly"
+      - "{{ backup_first.stdout_lines | default(['First backup: already done before']) | last }}"
+      - "Password copy on this computer: credentials/{{ inventory_hostname }}-{{ backup_name }}-restic (keep it safe, it is the only way to read the backups)"
