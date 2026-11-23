@@ -32,11 +32,21 @@
     mode: "0700"
   when: not app_server_use_letsencrypt | bool
 
+- name: Name and addresses for the self-signed certificate
+  ansible.builtin.set_fact:
+    # The certificate name (CN) may not be longer than 64 characters
+    app_server_cert_cn: "{{ (app_server_domain if app_server_domain else ansible_facts['hostname'] | default(inventory_hostname))[:64] }}"
+    app_server_cert_san: >-
+      {{ (['DNS:' ~ (app_server_domain if app_server_domain else ansible_facts['hostname'] | default(inventory_hostname)), 'DNS:localhost', 'IP:127.0.0.1']
+          + (ansible_facts['all_ipv4_addresses'] | default([]) | map('regex_replace', '^', 'IP:') | list)) | unique | join(',') }}
+  when: not app_server_use_letsencrypt | bool
+
 - name: Self-signed certificate (lab / IP address only, valid 2 years)
   ansible.builtin.command:
     cmd: >-
       openssl req -x509 -nodes -newkey rsa:2048 -days 730
-      -subj "/CN={{ app_server_domain if app_server_domain else ansible_facts['fqdn'] | default(inventory_hostname) }}"
+      -subj "/CN={{ app_server_cert_cn }}"
+      -addext "subjectAltName={{ app_server_cert_san }}"
       -keyout /etc/ssl/{{ app_server_name }}/privkey.pem
       -out /etc/ssl/{{ app_server_name }}/fullchain.pem
     creates: /etc/ssl/{{ app_server_name }}/fullchain.pem
