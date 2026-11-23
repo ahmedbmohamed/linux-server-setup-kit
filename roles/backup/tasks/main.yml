@@ -80,7 +80,17 @@
   register: backup_repo_check
   changed_when: false
   failed_when: false
-  no_log: true
+
+- name: Stop if the repository exists but the password does not match
+  ansible.builtin.fail:
+    msg: >-
+      The backup repository {{ backup_repository }} already exists, but the password in
+      credentials/{{ inventory_hostname }}-{{ backup_name }}-restic does not open it.
+      Put back the original credentials file (or set backup_password); otherwise the
+      existing backups cannot be read. No backup settings were changed.
+  when:
+    - backup_repo_check.rc != 0
+    - ('wrong password' in backup_repo_check.stderr) or ('no key found' in backup_repo_check.stderr)
 
 - name: Create the encrypted repository
   ansible.builtin.command: restic init
