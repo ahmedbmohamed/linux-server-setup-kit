@@ -9,6 +9,7 @@
 
 - name: Enable EPEL on RHEL family (needed for certbot)
   ansible.builtin.dnf:
+    lock_timeout: 600
     name: "{{ 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-' ~ ansible_facts['distribution_major_version'] ~ '.noarch.rpm' if ansible_facts['distribution'] == 'RedHat' else 'epel-release' }}"
     state: present
   when:
@@ -19,9 +20,21 @@
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 3600
+    lock_timeout: 600
   when: ansible_facts['os_family'] == 'Debian'
 
-- name: Install packages
-  ansible.builtin.package:
+# Wait up to 10 minutes for the package lock: automatic updates, or another
+# inventory host on the same machine (production + staging), may hold it.
+- name: Install packages (Debian family)
+  ansible.builtin.apt:
     name: "{{ app_server_packages + (['certbot'] if app_server_use_letsencrypt | bool else []) }}"
     state: present
+    lock_timeout: 600
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install packages (RHEL family)
+  ansible.builtin.dnf:
+    name: "{{ app_server_packages + (['certbot'] if app_server_use_letsencrypt | bool else []) }}"
+    state: present
+    lock_timeout: 600
+  when: ansible_facts['os_family'] == 'RedHat'

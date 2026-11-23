@@ -10,13 +10,23 @@
 
     - name: Enable EPEL
       ansible.builtin.dnf:
+        lock_timeout: 600
         name: "{{ 'https://dl.fedoraproject.org/pub/epel/epel-release-latest-' ~ ansible_facts['distribution_major_version'] ~ '.noarch.rpm' if ansible_facts['distribution'] == 'RedHat' else 'epel-release' }}"
         state: present
 
-- name: Install restic
-  ansible.builtin.package:
+- name: Install restic (Debian family)
+  ansible.builtin.apt:
     name: restic
     state: present
+    lock_timeout: 600
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install restic (RHEL family)
+  ansible.builtin.dnf:
+    name: restic
+    state: present
+    lock_timeout: 600
+  when: ansible_facts['os_family'] == 'RedHat'
 
 - name: Config folders (root only)
   ansible.builtin.file:
